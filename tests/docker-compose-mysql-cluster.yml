@@ -1,0 +1,159 @@
+version: "3.9"
+
+services:
+
+  mysql-server-1:
+    image: mysql/mysql-server:8.0.12
+    environment:
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_ROOT_HOST: ${MYSQL_ROOT_HOST}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h localhost -uroot -p${MYSQL_ROOT_PASSWORD}"
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 10s
+    volumes:
+      - ./exporter.sql:/docker-entrypoint-initdb.d/exporter.sql
+      - mysql-server-1-data:/var/lib/mysql
+    command: ["mysqld","--server_id=1","--binlog_checksum=NONE","--gtid_mode=ON","--enforce_gtid_consistency=ON","--log_bin","--log_slave_updates=ON","--master_info_repository=TABLE","--relay_log_info_repository=TABLE","--transaction_write_set_extraction=XXHASH64","--user=mysql","--skip-host-cache","--skip-name-resolve", "--default_authentication_plugin=mysql_native_password"]
+    deploy:
+      resources:
+        limits:
+          cpus: ".1"
+          memory: "1G"
+        reservations:
+          cpus: ".1"
+          memory: "1G"
+
+  mysql-server-2:
+    image: mysql/mysql-server:8.0.12
+    environment:
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_ROOT_HOST: ${MYSQL_ROOT_HOST}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h localhost -uroot -p${MYSQL_ROOT_PASSWORD}"
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 10s
+    volumes:
+      - mysql-server-2-data:/var/lib/mysql
+    command: ["mysqld","--server_id=2","--binlog_checksum=NONE","--gtid_mode=ON","--enforce_gtid_consistency=ON","--log_bin","--log_slave_updates=ON","--master_info_repository=TABLE","--relay_log_info_repository=TABLE","--transaction_write_set_extraction=XXHASH64","--user=mysql","--skip-host-cache","--skip-name-resolve", "--default_authentication_plugin=mysql_native_password"]
+    deploy:
+      resources:
+        limits:
+          cpus: ".1"
+          memory: "1G"
+        reservations:
+          cpus: ".1"
+          memory: "1G"
+
+  mysql-server-3:
+    image: mysql/mysql-server:8.0.12
+    environment:
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_ROOT_HOST: ${MYSQL_ROOT_HOST}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h localhost -uroot -p${MYSQL_ROOT_PASSWORD}"
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 10s
+    volumes:
+      - mysql-server-3-data:/var/lib/mysql
+    command: ["mysqld","--server_id=3","--binlog_checksum=NONE","--gtid_mode=ON","--enforce_gtid_consistency=ON","--log_bin","--log_slave_updates=ON","--master_info_repository=TABLE","--relay_log_info_repository=TABLE","--transaction_write_set_extraction=XXHASH64","--user=mysql","--skip-host-cache","--skip-name-resolve", "--default_authentication_plugin=mysql_native_password"]
+    deploy:
+      resources:
+        limits:
+          cpus: ".1"
+          memory: "1G"
+        reservations:
+          cpus: ".1"
+          memory: "1G"
+
+  mysql-shell:
+    image: neumayer/mysql-shell-batch
+    volumes:
+      - ./setupCluster.js:/scripts/setupCluster.js
+    depends_on:
+      mysql-server-1:
+        condition: service_healthy
+      mysql-server-2:
+        condition: service_healthy
+      mysql-server-3:
+        condition: service_healthy
+    environment:
+      MYSQL_USER: root
+      MYSQL_HOST: mysql-server-1
+      MYSQL_PORT: 3306
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQLSH_SCRIPT: /scripts/setupCluster.js
+
+  mysql-router:
+    image: mysql/mysql-router
+    environment:
+      MYSQL_USER: root
+      MYSQL_HOST: mysql-server-1
+      MYSQL_PORT: 3306
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_INNODB_NUM_MEMBERS: 3
+    ports:
+      - "6446:6446"
+    depends_on:
+      mysql-server-1:
+        condition: service_healthy
+      mysql-server-2:
+        condition: service_healthy
+      mysql-server-3:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    ports:
+      - 9090:9090
+    depends_on:
+      - mysqld-exporter
+
+  mysqld-exporter:
+    image: prom/mysqld-exporter
+    command:
+      - --collect.info_schema.query_response_time
+    container_name: mysqld-exporter
+    environment:
+      - DATA_SOURCE_NAME=root:root_pass@(mysql-router:6447)/
+    ports:
+      - 9104:9104
+    depends_on:
+      - mysql-router
+
+volumes:
+  mysql-server-1-data:
+  mysql-server-2-data:
+  mysql-server-3-data:
